@@ -26,6 +26,7 @@
 #include "llvm/IR/Value.h"
 #include <map>
 #include <string>
+#include <deque>
 
 using namespace llvm;
 
@@ -36,138 +37,99 @@ using namespace llvm;
 // everything in an anonymous namespace.
 namespace {
 
-struct Operation {
-  std::string opStr;
+bool setContains(std::set<Value *>& set, Value *element) {
+  return set.find(element) != set.end();
+}
 
-  Operation(int left, int code, int right) {
-    this->opStr = formatv("{0} {1} {2}", left, code, right).str();
+void setUnion(std::set<Value *>& lhs, std::set<Value *>& rhs) {
+  lhs.insert(rhs.begin(), rhs.end());
+}
+
+void setDiff(std::set<Value *>& lhs, std::set<Value *>& rhs) {
+  for (Value *v : rhs) {lhs.erase(v);}
+}
+
+std::string set2str(std::set<Value *>& set) {
+  std::string result;
+  for (auto it = set.begin(); it != set.end(); ++it) {
+      if (!result.empty()) {
+          result += " ";
+      }
+      result += (*it)->getName().str(); 
   }
-
-  Operation(llvm::Value* left) {
-   this->opStr = formatv("{0}", left).str();
-  }
-
-  bool operator==(const Operation& other) const {
-    return opStr == other.opStr;
-  }
-
-  bool operator<(const Operation& other) const {
-    return opStr < other.opStr;
-  }
-
-  
-};
-
-class VNHashTable {
-  private:
-    std::map<Operation, int> vn_data;
-    int v;
-  public:
-    VNHashTable() : v(1) {}
-
-    int insert(Operation op) {
-      int r = v;
-      vn_data[op] = v;
-      v++;
-      return r; // vn_data[op];
-    }
-    void insert(Operation op, int n) {
-      vn_data[op] = n;
-    }
-    int getVN(Operation op) {
-      if (vn_data.count(op) == 1)
-        return vn_data[op];
-      else
-        return -1;
-    }
-    std::string getContentsString() {
-      std::string contents;
-      for (const auto& pair : vn_data) {
-        contents += "HT " + pair.first.opStr +
-                    " : " + std::to_string(pair.second) + "\n";
-    }
-    return contents;
-  }
-};
-
-bool isIn(std::set<std::string> Ops, std::string ins) {
-  auto it = Ops.find(ins);
-    if (it != Ops.end())
-      return true;
-    else
-      return false;
+  return result;
 }
 
 // This method implements what the pass does
 void visitor(Function &F) {
   //auto functionName = F.getName();
   //auto argCount = F.arg_size();
-  std::set<std::string> arthOps = {"add", "sub", "mul", "udiv", "sdiv"};
-  std::set<std::string> lsOps = {"load", "store"};
-  VNHashTable vnht;  
+
+  struct BlockInfo {
+    std::set<Value *> ueVar, varKill, liveOut;
+  };
+
+  std::map<BasicBlock *, BlockInfo> blockInfo;
+  std::deque<BasicBlock *> workList;
 
   for (auto& basicBlock : F) {
-    // errs() << basicBlock.getName() << "\n";
+    //errs() << basicBlock.getName() << "\n";
     for (auto& ins : basicBlock) {
-      if (isIn(arthOps, ins.getOpcodeName())) {
-        bool isRed = false;
-        Value *op0 = ins.getOperand(0);
-        Value *op1 = ins.getOperand(1);
-        Operation L(op0), R(op1), T(&ins);
-        int vL = vnht.getVN(L);
-        if (vL == -1) {
-          vL = vnht.insert(L);
-          //errs() << formatv("Insert {0}->{1}", L.opStr, l ) << "\n";
-        }
-        int vR = vnht.getVN(R);          
-        if (vR == -1) {
-          vR = vnht.insert(R);
-          //errs() << formatv("Insert {0}->{1}", R.opStr, r ) << "\n";
-        }
-        Operation LopR(vL, ins.getOpcode(), vR);
-        int vLopR = vnht.getVN(LopR);
-        if (vLopR != -1) {
-          //errs() << formatv("Insert {0}->{1}", LopR.opStr, vLopR ) << "\n";
-          isRed = true;
-        }
-        else {
-          isRed = false;
-          vLopR = vnht.insert(LopR);
-          //errs() << formatv("Insert {0}->{1}", LopR.opStr, lor ) << "\n";
-          //errs() << formatv("{0}", vnht.getContentsString()) << "\n";
-        }
-        vnht.insert(T, vLopR);
-        //errs () << formatv("To:{0} Op0:{1} OpCode:{2} Op1:{3} Ins:{4}", &ins ,op0, ins.getOpcode(), op1, ins) << "\n";
-        if (isRed)  
-          errs () << formatv("{0, -40} {1} = {2} {3} {4} (redundant)", ins, vLopR, vL, ins.getOpcodeName(), vR) << "\n";
-        else
-          errs () << formatv("{0, -40} {1} = {2} {3} {4}", ins, vLopR, vL, ins.getOpcodeName(), vR) << "\n";
-
-      }
-      else if (isIn(lsOps, ins.getOpcodeName())) {
-        Value *op0 = ins.getOperand(0);
-        Operation L(op0);
-        Operation T = (ins.getNumOperands() == 1) ? Operation(&ins) : Operation(ins.getOperand(1));
-        // if (ins.getNumOperands() == 1)
-        //   auto T = Operation(&ins);
-        // else
-        //   auto T = Operation(ins.getOperand(1));
-        
-        int vL = vnht.getVN(L);
-        //errs() << formatv("{0}", vnht.getContentsString()) << "\n";
-        if (vL == -1) {
-          vL = vnht.insert(L);
-          vnht.insert(T, vL);
-          //errs() << formatv("Insert {0}->{1}", L.opStr, vL) << "\n";
-          //errs() << formatv("Insert {0}->{1}", T.opStr, vL) << "\n";
-        } else {
-          vnht.insert(T, vL);
-          //errs() << formatv("Insert {0}->{1}", T.opStr, vL) << "\n";
-        }
-        //errs () << formatv("To:{0} Op0:{1} OpCode:{2} Ins:{3}", T.opStr ,op0, ins.getOpcode(), ins) << "\n";
-        errs () << formatv("{0, -40} {1} = {2}",ins , vL , vL) << "\n";
+      switch (ins.getOpcode()) {
+        case Instruction::Load: {
+          llvm::LoadInst *loadInst = llvm::dyn_cast<llvm::LoadInst>(&ins);
+          llvm::Value *operand = loadInst->getPointerOperand();
+          if (!setContains(blockInfo[&basicBlock].varKill, operand)) {
+            blockInfo[&basicBlock].ueVar.insert(operand);
+          } 
+            
+            // if (operand->hasName()) {
+            //   std::string varName = operand->getName().str();
+            //   errs() << varName << "\n";
+            // }
+        } break;
+        case Instruction::Store: {
+          llvm::StoreInst *storeInst = llvm::dyn_cast<llvm::StoreInst>(&ins); 
+          llvm::Value *operand = storeInst->getPointerOperand();
+          blockInfo[&basicBlock].varKill.insert(operand);
+        } break;
+      default:
+        break;
       }
     }
+    workList.push_back(&basicBlock);
+
+    // for (auto var : blockInfo[&basicBlock].ueVar) {
+    //   errs() << var->getName().str() << "\t";
+    // }
+    // errs() << "\n";
+  }
+
+  while (!workList.empty()) {
+    BasicBlock *block = workList.front();
+    workList.pop_front();
+    std::set<Value *> newLiveOut;
+    for (BasicBlock *succ: successors(block)) {
+      std::set<Value *> temp = blockInfo[succ].liveOut;
+      setDiff(temp, blockInfo[succ].varKill);
+      setUnion(temp ,blockInfo[succ].ueVar);
+      setUnion(newLiveOut, temp);
+    }
+    if (blockInfo[block].liveOut != newLiveOut) {
+      for (BasicBlock *pred: predecessors(block)) {
+        if (std::find(workList.begin(), workList.end(), pred) == workList.end()) {
+          workList.push_back(pred);
+        }
+      }
+    }
+    blockInfo[block].liveOut = newLiveOut;
+  }
+  
+  for (auto& basicBlock : F) {
+    errs() << formatv("----- {0} -----", basicBlock.getName()) << "\n";
+    errs() << formatv("UEVAR: {0}", set2str(blockInfo[&basicBlock].ueVar)) << "\n";
+    errs() << formatv("VARKILL: {0}", set2str(blockInfo[&basicBlock].varKill)) << "\n";
+    errs() << formatv("LIVEOUT: {0}", set2str(blockInfo[&basicBlock].liveOut)) << "\n";
   }
 }
 

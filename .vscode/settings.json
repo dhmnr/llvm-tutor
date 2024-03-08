@@ -50,6 +50,18 @@
         "ios": "cpp",
         "deque": "cpp",
         "map": "cpp",
-        "set": "cpp"
+        "set": "cpp",
+        "cctype": "cpp",
+        "cwctype": "cpp",
+        "__tree": "cpp",
+        "locale": "cpp",
+        "span": "cpp",
+        "format": "cpp",
+        "chrono": "cpp",
+        "charconv": "cpp",
+        "bitset": "cpp",
+        "__memory": "cpp",
+        "queue": "cpp",
+        "stack": "cpp"
     }
 }

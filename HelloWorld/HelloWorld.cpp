@@ -70,6 +70,7 @@ void visitor(Function &F) {
   };
 
   std::map<BasicBlock *, BlockInfo> blockInfo;
+  
   std::deque<BasicBlock *> workList;
 
   for (auto& basicBlock : F) {
@@ -82,11 +83,6 @@ void visitor(Function &F) {
           if (!setContains(blockInfo[&basicBlock].varKill, operand)) {
             blockInfo[&basicBlock].ueVar.insert(operand);
           } 
-            
-            // if (operand->hasName()) {
-            //   std::string varName = operand->getName().str();
-            //   errs() << varName << "\n";
-            // }
         } break;
         case Instruction::Store: {
           llvm::StoreInst *storeInst = llvm::dyn_cast<llvm::StoreInst>(&ins); 
@@ -98,11 +94,6 @@ void visitor(Function &F) {
       }
     }
     workList.push_back(&basicBlock);
-
-    // for (auto var : blockInfo[&basicBlock].ueVar) {
-    //   errs() << var->getName().str() << "\t";
-    // }
-    // errs() << "\n";
   }
 
   while (!workList.empty()) {
